@@ -18,7 +18,7 @@ logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
 log = logging.getLogger('inkscape-figures')
 
 def inkscape(path):
-    subprocess.Popen(['inkscape', str(path)])
+    subprocess.Popen(['open', '-a', '/Applications/Affinity Designer.app', str(path)])
 
 def indent(text, indentation=0):
     lines = text.split('\n');
