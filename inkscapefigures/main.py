@@ -8,13 +8,13 @@ from shutil import copy
 from daemonize import Daemonize
 import click
 
-import inotify.adapters
-from inotify.constants import IN_CLOSE_WRITE
 from .rofi import rofi
 import pyperclip
 from appdirs import user_config_dir
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
-logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
+logging.basicConfig(level=os.environ.get("LOGLEVEL", "DEBUG"))
 log = logging.getLogger('inkscape-figures')
 
 def inkscape(path):
@@ -105,46 +105,34 @@ def watch(daemon):
         watch_daemon()
 
 def watch_daemon():
-    while True:
-        roots = get_roots()
+    observer = Observer()
 
-        # Watch the file with contains the paths to watch
-        # When this file changes, we update the watches.
-        i = inotify.adapters.Inotify()
-        i.add_watch(str(roots_file), mask=IN_CLOSE_WRITE)
-
-        # Watch the actual figure directories
-        log.info('Watching directories: ' + ', '.join(get_roots()))
-        for root in roots:
-            try:
-                i.add_watch(root, mask=IN_CLOSE_WRITE)
-            except Exception:
-                log.debug('Could not add root %s', root)
-
-        for event in i.event_gen(yield_nones=False):
-            (_, type_names, path, filename) = event
+    class FigureEventHandler(FileSystemEventHandler):
+        def on_modified(self, event):
+            event_type, path = event.event_type, event.src_path
 
             # If the file containing figure roots has changes, update the
             # watches
             if path == str(roots_file):
                 log.info('The roots file has been updated. Updating watches.')
+                observer.unschedule_all()
+                roots = get_roots()
+                observer.schedule(self, roots_file)
                 for root in roots:
                     try:
-                        i.remove_watch(root)
-                        log.debug('Removed root %s', root)
+                        observer.schedule(self, root)
                     except Exception:
-                        log.debug('Could not remove root %s', root)
-                # Break out of the loop, setting up new watches.
-                break
+                        log.debug('Could not add root %s', root)
+                return
 
+
+            path = Path(path)
             # A file has changed
-            path = Path(path) / filename
-
             if path.suffix != '.svg':
-                log.debug('File has changed, but is nog an svg')
-                continue
+                log.debug('File has changed, but is not an svg')
+                return
 
-            log.info('Recompiling %s', filename)
+            log.info('Recompiling %s', path.stem)
 
             pdf_path = path.parent / (path.stem + '.pdf')
             name = path.stem
@@ -174,6 +162,20 @@ def watch_daemon():
             pyperclip.copy(latex_template(name, beautify(name)))
 
 
+    handler = FigureEventHandler()
+    # Watch the file with contains the paths to watch
+    # When this file changes, we update the watches.
+    observer.schedule(handler, str(user_dir))
+
+    # Watch the actual figure directories
+    log.info('Watching directories: ' + ', '.join(get_roots()))
+    for root in get_roots():
+        try:
+            observer.schedule(handler, root)
+        except Exception:
+            log.debug('Could not add root %s', root)
+    observer.start()
+    observer.join()
 
 
 @cli.command()
