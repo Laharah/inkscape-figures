@@ -117,7 +117,7 @@ def watch_daemon():
                 log.info('The roots file has been updated. Updating watches.')
                 observer.unschedule_all()
                 roots = get_roots()
-                observer.schedule(self, roots_file)
+                observer.schedule(self, str(user_dir))
                 for root in roots:
                     try:
                         observer.schedule(self, root)
